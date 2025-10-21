@@ -10,13 +10,18 @@ import (
 
 // Config represents the main configuration structure
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	Clusters   []ClusterConfig  `yaml:"clusters"`
-	Producer   ProducerConfig   `yaml:"producer"`
-	Consumer   ConsumerConfig   `yaml:"consumer"`
-	Security   SecurityConfig   `yaml:"security"`
-	Monitoring MonitoringConfig `yaml:"monitoring"`
-	Performance PerformanceConfig `yaml:"performance"`
+	Server         ServerConfig         `yaml:"server"`
+	Clusters       []ClusterConfig      `yaml:"clusters"`
+	Producer       ProducerConfig       `yaml:"producer"`
+	Consumer       ConsumerConfig       `yaml:"consumer"`
+	Security       SecurityConfig       `yaml:"security"`
+	Monitoring     MonitoringConfig     `yaml:"monitoring"`
+	Performance    PerformanceConfig    `yaml:"performance"`
+	SchemaRegistry SchemaRegistryConfig `yaml:"schema_registry"`
+	Transformation TransformationConfig `yaml:"transformation"`
+	RateLimit      RateLimitConfig      `yaml:"rate_limit"`
+	AdminAPI       AdminAPIConfig       `yaml:"admin_api"`
+	MultiDC        MultiDCConfig        `yaml:"multi_dc"`
 }
 
 // ServerConfig contains proxy server settings
@@ -213,6 +218,59 @@ type BatchingConfig struct {
 type WorkerConfig struct {
 	MinWorkers int `yaml:"min_workers"`
 	MaxWorkers int `yaml:"max_workers"`
+}
+
+// SchemaRegistryConfig contains Schema Registry settings
+type SchemaRegistryConfig struct {
+	Enabled  bool          `yaml:"enabled"`
+	URL      string        `yaml:"url"`
+	Timeout  time.Duration `yaml:"timeout"`
+	CacheTTL time.Duration `yaml:"cache_ttl"`
+	Auth     struct {
+		Username string `yaml:"username"`
+		Password string `yaml:"password"`
+	} `yaml:"auth"`
+}
+
+// TransformationConfig contains message transformation settings
+type TransformationConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// RateLimitConfig contains rate limiting settings
+type RateLimitConfig struct {
+	Enabled                  bool          `yaml:"enabled"`
+	DefaultRequestsPerSecond int64         `yaml:"default_requests_per_second"`
+	DefaultBytesPerSecond    int64         `yaml:"default_bytes_per_second"`
+	BurstSize                int64         `yaml:"burst_size"`
+	QuotaCheckInterval       time.Duration `yaml:"quota_check_interval"`
+}
+
+// AdminAPIConfig contains Admin API settings
+type AdminAPIConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Port    int    `yaml:"port"`
+	WebUI   bool   `yaml:"web_ui"`
+}
+
+// MultiDCConfig contains multi-datacenter settings
+type MultiDCConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	Strategy            string `yaml:"strategy"` // active-active, active-passive, regional-active, preferred
+	LocalDC             string `yaml:"local_dc"`
+	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
+	LatencyThreshold    time.Duration `yaml:"latency_threshold"`
+	PreferLocalReads    bool          `yaml:"prefer_local_reads"`
+	Datacenters         []DatacenterConfig `yaml:"datacenters"`
+}
+
+// DatacenterConfig contains datacenter configuration
+type DatacenterConfig struct {
+	ID         string   `yaml:"id"`
+	Name       string   `yaml:"name"`
+	Region     string   `yaml:"region"`
+	Priority   int      `yaml:"priority"`
+	ClusterIDs []string `yaml:"cluster_ids"`
 }
 
 // LoadConfig loads configuration from a YAML file

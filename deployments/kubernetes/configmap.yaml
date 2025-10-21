@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafkatwin-config
+  labels:
+    app: kafkatwin
+data:
+  config.yaml: |
+    server:
+      listen_address: "0.0.0.0"
+      port: 9092
+
+    clusters:
+      - id: "cluster-1"
+        bootstrap_servers:
+          - "kafka-1.kafka.svc.cluster.local:9092"
+        priority: 1
+        weight: 100
+        timeout:
+          connection: 10s
+          request: 30s
+          metadata: 5s
+
+      - id: "cluster-2"
+        bootstrap_servers:
+          - "kafka-2.kafka.svc.cluster.local:9092"
+        priority: 1
+        weight: 100
+        timeout:
+          connection: 10s
+          request: 30s
+          metadata: 5s
+
+    producer:
+      ack_policy: "MAJORITY"
+      quorum_count: 2
+      timeout: 30s
+      max_retries: 3
+      retry_backoff: 100ms
+
+    consumer:
+      max_poll_records: 500
+      session_timeout: 10s
+      heartbeat_interval: 3s
+      offset_storage:
+        type: "memory"
+
+    monitoring:
+      metrics:
+        enabled: true
+        port: 9090
+        path: "/metrics"
+
+      logging:
+        level: "INFO"
+        format: "json"
+        output: "stdout"
+
+      health:
+        enabled: true
+        port: 8080
+        interval: 10s
+        timeout: 5s
+
+    performance:
+      connection_pool:
+        min_connections: 2
+        max_connections: 10
+        idle_timeout: 5m
+
+      cache:
+        metadata_ttl: 5m
+        offset_ttl: 1m
