@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KafkaTwin Admin Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔄 KafkaTwin Admin Dashboard</h1>
+            <p class="subtitle">Multi-Cluster Kafka Proxy Management</p>
+        </header>
+
+        <nav>
+            <button class="nav-btn active" data-view="overview">Overview</button>
+            <button class="nav-btn" data-view="clusters">Clusters</button>
+            <button class="nav-btn" data-view="topics">Topics</button>
+            <button class="nav-btn" data-view="transformations">Transformations</button>
+            <button class="nav-btn" data-view="quotas">Quotas</button>
+            <button class="nav-btn" data-view="schemas">Schemas</button>
+        </nav>
+
+        <main id="main-content">
+            <!-- Overview Section -->
+            <div id="overview" class="view-section active">
+                <h2>System Overview</h2>
+                <div class="card-grid">
+                    <div class="card">
+                        <h3>Clusters</h3>
+                        <div class="stat" id="cluster-count">0</div>
+                        <p class="stat-label">Total Clusters</p>
+                    </div>
+                    <div class="card">
+                        <h3>Topics</h3>
+                        <div class="stat" id="topic-count">0</div>
+                        <p class="stat-label">Total Topics</p>
+                    </div>
+                    <div class="card">
+                        <h3>Health</h3>
+                        <div class="stat health" id="system-health">HEALTHY</div>
+                        <p class="stat-label">System Status</p>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h3>Cluster Health Status</h3>
+                    <div id="cluster-health-list" class="list-container"></div>
+                </div>
+            </div>
+
+            <!-- Clusters Section -->
+            <div id="clusters" class="view-section">
+                <h2>Kafka Clusters</h2>
+                <div id="cluster-list" class="list-container"></div>
+            </div>
+
+            <!-- Topics Section -->
+            <div id="topics" class="view-section">
+                <h2>Topics</h2>
+                <div id="topic-list" class="list-container"></div>
+            </div>
+
+            <!-- Transformations Section -->
+            <div id="transformations" class="view-section">
+                <h2>Message Transformations</h2>
+                <div class="action-bar">
+                    <button id="add-transformation-btn" class="btn btn-primary">+ Add Transformation</button>
+                </div>
+                <div id="transformation-list" class="list-container"></div>
+            </div>
+
+            <!-- Quotas Section -->
+            <div id="quotas" class="view-section">
+                <h2>Rate Limits & Quotas</h2>
+                <div class="action-bar">
+                    <button id="add-quota-btn" class="btn btn-primary">+ Add Quota</button>
+                </div>
+                <div id="quota-list" class="list-container"></div>
+            </div>
+
+            <!-- Schemas Section -->
+            <div id="schemas" class="view-section">
+                <h2>Schema Registry</h2>
+                <div class="action-bar">
+                    <button id="register-schema-btn" class="btn btn-primary">+ Register Schema</button>
+                </div>
+                <div id="schema-list" class="list-container"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-overlay" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Modal</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close">Cancel</button>
+                <button class="btn btn-primary" id="modal-submit">Submit</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

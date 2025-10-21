@@ -1,48 +1,62 @@
-# KafkaTwin - Kafka Multi-Cluster Proxy
+# KafkaTwin - Enterprise Kafka Multi-Cluster Proxy
 
-KafkaTwin, birden fazla Apache Kafka cluster'ını tek bir endpoint üzerinden yönetmeyi ve veri senkronizasyonunu otomatik olarak sağlamayı hedefleyen bir proxy servisidir.
+KafkaTwin, birden fazla Apache Kafka cluster'ını tek bir endpoint üzerinden yönetmeyi ve veri senkronizasyonunu otomatik olarak sağlamayı hedefleyen enterprise-grade bir proxy servisidir.
 
 ## 🎯 Özellikler
 
-- **Tek Endpoint**: Tüm producer ve consumer'lar tek bir proxy endpoint'e bağlanır
-- **Multi-Cluster Yazma**: Producer'dan gelen her mesaj otomatik olarak tüm cluster'lara yazılır
-- **Multi-Cluster Okuma**: Consumer group'ları tüm cluster'lardan koordineli şekilde veri okur
-- **Otomatik Hata Yönetimi**: Cluster failure'larında otomatik retry ve fallback
-- **Circuit Breaker**: Sürekli fail olan cluster'ları geçici olarak devre dışı bırakma
-- **Health Monitoring**: Sürekli cluster health kontrolü
-- **Detaylı Monitoring**: Prometheus metrics, structured logging, distributed tracing
-- **Dinamik Cluster Yönetimi**: Runtime'da cluster ekleme ve çıkarma (planned)
-- **Flexible Configuration**: YAML config, environment variable override
+### Core Features
+- ✅ **Tek Endpoint**: Tüm producer ve consumer'lar tek bir proxy endpoint'e bağlanır
+- ✅ **Multi-Cluster Yazma**: Producer'dan gelen her mesaj otomatik olarak tüm cluster'lara yazılır
+- ✅ **Multi-Cluster Okuma**: Consumer group'ları tüm cluster'lardan koordineli şekilde veri okur
+- ✅ **Otomatik Hata Yönetimi**: Cluster failure'larında otomatik retry ve fallback
+- ✅ **Circuit Breaker**: Sürekli fail olan cluster'ları geçici olarak devre dışı bırakma
+- ✅ **Health Monitoring**: Sürekli cluster health kontrolü ve otomatik recovery
+
+### Advanced Features
+- ✅ **Schema Registry Integration**: Avro, JSON, Protobuf schema yönetimi
+- ✅ **Message Transformation**: Runtime message dönüşüm engine'i
+- ✅ **Rate Limiting & Quotas**: Client bazlı rate limiting ve quota management
+- ✅ **Admin REST API**: Comprehensive management API
+- ✅ **Web Dashboard**: Real-time monitoring ve yönetim UI'ı
+- ✅ **Multi-DC Support**: Geo-distributed cluster'lar için optimizasyonlar
+- ✅ **Prometheus Metrics**: Detaylı metrik ve monitoring
+- ✅ **Kubernetes Ready**: Native Kubernetes deployment support
+- ✅ **Flexible Configuration**: YAML config, environment variable override
 
 ## 🏗️ Mimari
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      KafkaTwin Proxy                        │
-│                                                             │
-│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-│  │  Protocol   │  │   Producer   │  │    Consumer      │  │
-│  │   Handler   │  │   Handler    │  │    Handler       │  │
-│  └─────────────┘  └──────────────┘  └──────────────────┘  │
-│         │                 │                    │           │
-│  ┌──────┴─────────────────┴────────────────────┴────────┐ │
-│  │              Cluster Manager                          │ │
-│  │  (Health Monitoring, Circuit Breaker, Conn Pool)     │ │
-│  └───────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-         │                  │                   │
-         ▼                  ▼                   ▼
-   ┌──────────┐      ┌──────────┐       ┌──────────┐
-   │ Kafka    │      │ Kafka    │       │ Kafka    │
-   │ Cluster  │      │ Cluster  │       │ Cluster  │
-   │    1     │      │    2     │       │    3     │
-   └──────────┘      └──────────┘       └──────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        KafkaTwin Proxy                               │
+│                                                                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────────┐  │
+│  │ Protocol │  │ Producer │  │ Consumer │  │  Transformation    │  │
+│  │ Handler  │  │ Handler  │  │ Handler  │  │      Engine        │  │
+│  └─────┬────┘  └────┬─────┘  └────┬─────┘  └─────────┬──────────┘  │
+│        │            │             │                   │             │
+│  ┌─────┴────────────┴─────────────┴───────────────────┴──────────┐  │
+│  │              Cluster Manager & Metadata Cache                 │  │
+│  │  (Health Monitoring, Circuit Breaker, Connection Pool)        │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+│                                                                      │
+│  ┌──────────────────┐  ┌───────────────┐  ┌────────────────────┐  │
+│  │ Schema Registry  │  │  Rate Limiter │  │   Multi-DC Manager │  │
+│  └──────────────────┘  └───────────────┘  └────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+         │                  │                  │
+         ▼                  ▼                  ▼
+   ┌──────────┐       ┌──────────┐       ┌──────────┐
+   │ Kafka    │       │ Kafka    │       │ Kafka    │
+   │ DC-1     │       │ DC-2     │       │ DC-3     │
+   └──────────┘       └──────────┘       └──────────┘
 ```
 
 ## 📋 Gereksinimler
 
 - Go 1.21 veya üzeri
 - Apache Kafka 2.8.0 veya üzeri (backend clusters)
+- (Opsiyonel) Schema Registry
+- (Opsiyonel) Redis/etcd (offset storage için)
 - Linux, macOS veya Windows
 
 ## 🚀 Kurulum
@@ -54,8 +68,11 @@ KafkaTwin, birden fazla Apache Kafka cluster'ını tek bir endpoint üzerinden y
 git clone https://github.com/serkank2/kafkatwin.git
 cd kafkatwin
 
+# Bağımlılıkları indirin
+go mod download
+
 # Build edin
-go build -o kafkatwin ./cmd/proxy
+make build
 
 # Çalıştırın
 ./kafkatwin -config config.yaml
@@ -65,17 +82,35 @@ go build -o kafkatwin ./cmd/proxy
 
 ```bash
 # Docker image build edin
-docker build -t kafkatwin:latest .
+make docker-build
 
 # Çalıştırın
-docker run -p 9092:9092 -v $(pwd)/config.yaml:/config.yaml kafkatwin:latest
+docker run -p 9092:9092 -p 8080:8080 -p 9090:9090 -p 8000:8000 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  kafkatwin:latest
+```
+
+### Kubernetes Deployment
+
+```bash
+# ConfigMap oluşturun
+kubectl apply -f deployments/kubernetes/configmap.yaml
+
+# Deployment oluşturun
+kubectl apply -f deployments/kubernetes/deployment.yaml
+
+# HPA (opsiyonel)
+kubectl apply -f deployments/kubernetes/hpa.yaml
+
+# PDB (opsiyonel)
+kubectl apply -f deployments/kubernetes/pdb.yaml
 ```
 
 ## ⚙️ Konfigürasyon
 
 Detaylı konfigürasyon örneği için `configs/example-config.yaml` dosyasına bakın.
 
-### Minimal Konfigürasyon
+### Temel Konfigürasyon
 
 ```yaml
 server:
@@ -89,22 +124,19 @@ clusters:
     priority: 1
     weight: 100
 
-  - id: "cluster-2"
-    bootstrap_servers:
-      - "kafka2.example.com:9092"
-    priority: 1
-    weight: 100
-
 producer:
-  ack_policy: "MAJORITY"  # ALL_CLUSTERS, MAJORITY, ANY, QUORUM
+  ack_policy: "MAJORITY"
   timeout: 30s
-  max_retries: 3
 
 consumer:
   max_poll_records: 500
-  session_timeout: 10s
   offset_storage:
-    type: "memory"  # memory, redis, etcd, kafka
+    type: "memory"
+
+admin_api:
+  enabled: true
+  port: 8000
+  web_ui: true
 
 monitoring:
   metrics:
@@ -113,225 +145,209 @@ monitoring:
   health:
     enabled: true
     port: 8080
-  logging:
-    level: "INFO"
-    format: "json"
 ```
 
-### Cluster Security Konfigürasyonu
+## 📊 Admin API & Web UI
+
+KafkaTwin, kapsamlı bir Admin API ve Web Dashboard sunar.
+
+### Web Dashboard
+
+Web UI'ya erişim: `http://localhost:8000`
+
+Dashboard özellikleri:
+- Real-time cluster health monitoring
+- Topic ve partition görüntüleme
+- Schema Registry yönetimi
+- Transformation rule yönetimi
+- Quota ve rate limit ayarları
+- Sistem metrikleri ve grafikler
+
+### API Endpoints
+
+**Cluster Yönetimi:**
+```bash
+GET /api/v1/clusters              # Tüm cluster'ları listele
+GET /api/v1/clusters/{id}         # Cluster detayları
+GET /api/v1/clusters/{id}/health  # Cluster health
+```
+
+**Topic Yönetimi:**
+```bash
+GET /api/v1/topics                # Tüm topic'leri listele
+GET /api/v1/topics/{topic}        # Topic detayları
+```
+
+**Schema Registry:**
+```bash
+GET  /api/v1/schemas/subjects                           # Subject listesi
+GET  /api/v1/schemas/subjects/{subject}/versions/latest # Latest schema
+POST /api/v1/schemas/subjects/{subject}                 # Schema kaydet
+```
+
+**Transformations:**
+```bash
+GET    /api/v1/transformations/{topic}         # Kuralları listele
+POST   /api/v1/transformations/{topic}         # Kural ekle
+DELETE /api/v1/transformations/{topic}/{id}    # Kural sil
+```
+
+**Quotas:**
+```bash
+GET    /api/v1/quotas/{client_id}  # Quota görüntüle
+PUT    /api/v1/quotas/{client_id}  # Quota ayarla
+DELETE /api/v1/quotas/{client_id}  # Quota sil
+```
+
+## 🔄 Message Transformation
+
+Message transformation örneği:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/transformations/my-topic \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "mask-pii",
+    "name": "Mask PII Data",
+    "enabled": true,
+    "priority": 10,
+    "conditions": [
+      {
+        "type": "field_exists",
+        "field": "ssn"
+      }
+    ],
+    "actions": [
+      {
+        "type": "mask_field",
+        "field": "ssn"
+      },
+      {
+        "type": "set_header",
+        "field": "pii-masked",
+        "value": "true"
+      }
+    ]
+  }'
+```
+
+Desteklenen transformation action'lar:
+- `set_field` - Alan değeri ayarla
+- `remove_field` - Alan sil
+- `rename_field` - Alan adını değiştir
+- `mask_field` - Alan değerini maskele
+- `set_header` - Kafka header ekle
+- `uppercase_field` - Büyük harfe çevir
+- `lowercase_field` - Küçük harfe çevir
+
+## 🌍 Multi-DC Support
+
+Multi-datacenter konfigürasyonu:
 
 ```yaml
-clusters:
-  - id: "secure-cluster"
-    bootstrap_servers:
-      - "kafka.example.com:9093"
-    security:
-      protocol: "SASL_SSL"
-      sasl:
-        enabled: true
-        mechanism: "SCRAM-SHA-256"
-        username: "kafka-user"
-        password: "kafka-password"
-      tls:
-        enabled: true
-        ca_file: "/path/to/ca-cert"
-        cert_file: "/path/to/client-cert"
-        key_file: "/path/to/client-key"
+multi_dc:
+  enabled: true
+  strategy: "active-active"
+  local_dc: "dc1"
+  prefer_local_reads: true
+  datacenters:
+    - id: "dc1"
+      name: "US East"
+      region: "us-east-1"
+      priority: 1
+      cluster_ids: ["cluster-1", "cluster-2"]
+
+    - id: "dc2"
+      name: "EU West"
+      region: "eu-west-1"
+      priority: 2
+      cluster_ids: ["cluster-3", "cluster-4"]
 ```
 
-## 📊 Monitoring
+Replication stratejileri:
+- **active-active**: Tüm DC'lere eşzamanlı yazma
+- **active-passive**: Primary DC'ye yazma, diğerleri standby
+- **regional-active**: Bölge içi aktif, bölgeler arası async
+- **preferred**: Local DC tercih edilir, fallback var
 
-### Prometheus Metrics
+## 📈 Prometheus Metrics
 
-KafkaTwin, Prometheus formatında detaylı metrikler expose eder:
+Temel metrikler:
 
-```bash
-curl http://localhost:9090/metrics
 ```
+# Produce metrics
+kafkatwin_produce_requests_total{topic, cluster, status}
+kafkatwin_produce_latency_seconds{topic, cluster}
+kafkatwin_produce_bytes_total{topic, cluster}
 
-**Temel Metrikler:**
+# Fetch metrics
+kafkatwin_fetch_requests_total{topic, cluster, status}
+kafkatwin_fetch_latency_seconds{topic, cluster}
+kafkatwin_fetch_bytes_total{topic, cluster}
 
-- `kafkatwin_produce_requests_total` - Toplam produce request sayısı
-- `kafkatwin_produce_latency_seconds` - Produce latency histogram
-- `kafkatwin_fetch_requests_total` - Toplam fetch request sayısı
-- `kafkatwin_cluster_health_status` - Cluster health durumu (1=healthy, 0=unhealthy)
-- `kafkatwin_active_connections` - Aktif client connection sayısı
-- `kafkatwin_consumer_group_members` - Consumer group member sayısı
-- `kafkatwin_errors_total` - Toplam hata sayısı
+# Cluster metrics
+kafkatwin_cluster_health_status{cluster}
+kafkatwin_cluster_connections_active{cluster}
 
-### Health Checks
-
-```bash
-# Liveness probe
-curl http://localhost:8080/health/live
-
-# Readiness probe
-curl http://localhost:8080/health/ready
-
-# Detailed health check
-curl http://localhost:8080/health
-```
-
-### Logging
-
-KafkaTwin, structured JSON logging kullanır:
-
-```json
-{
-  "level": "info",
-  "timestamp": "2024-01-15T10:30:45Z",
-  "msg": "Successfully produced to cluster",
-  "cluster": "cluster-1",
-  "topic": "my-topic",
-  "messages": 100,
-  "latency": "15ms"
-}
-```
-
-## 🔧 Kullanım
-
-### Producer Örneği (Go)
-
-```go
-package main
-
-import (
-    "github.com/IBM/sarama"
-)
-
-func main() {
-    config := sarama.NewConfig()
-    config.Producer.Return.Successes = true
-
-    // KafkaTwin proxy'ye bağlan
-    producer, err := sarama.NewSyncProducer([]string{"localhost:9092"}, config)
-    if err != nil {
-        panic(err)
-    }
-    defer producer.Close()
-
-    // Mesaj gönder - otomatik olarak tüm cluster'lara yazılır
-    msg := &sarama.ProducerMessage{
-        Topic: "my-topic",
-        Value: sarama.StringEncoder("Hello KafkaTwin!"),
-    }
-
-    partition, offset, err := producer.SendMessage(msg)
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Printf("Message sent to partition %d at offset %d\n", partition, offset)
-}
-```
-
-### Consumer Örneği (Go)
-
-```go
-package main
-
-import (
-    "github.com/IBM/sarama"
-)
-
-func main() {
-    config := sarama.NewConfig()
-    config.Consumer.Return.Errors = true
-
-    // KafkaTwin proxy'ye bağlan
-    consumer, err := sarama.NewConsumer([]string{"localhost:9092"}, config)
-    if err != nil {
-        panic(err)
-    }
-    defer consumer.Close()
-
-    // Partition consumer oluştur
-    partitionConsumer, err := consumer.ConsumePartition("my-topic", 0, sarama.OffsetNewest)
-    if err != nil {
-        panic(err)
-    }
-    defer partitionConsumer.Close()
-
-    // Mesajları oku - tüm cluster'lardan merge edilmiş data
-    for msg := range partitionConsumer.Messages() {
-        fmt.Printf("Message: %s\n", string(msg.Value))
-    }
-}
+# Consumer group metrics
+kafkatwin_consumer_group_members{group}
+kafkatwin_consumer_group_rebalance_total{group}
+kafkatwin_consumer_lag{group, topic, partition, cluster}
 ```
 
 ## 🎯 Ack Policy'leri
 
-KafkaTwin, farklı consistency gereksinimleri için multiple ack policy destekler:
+| Policy | Açıklama | Consistency | Performance |
+|--------|----------|-------------|-------------|
+| **ALL_CLUSTERS** | Tüm cluster'lardan ack | ⭐⭐⭐⭐⭐ | ⭐ |
+| **MAJORITY** | Çoğunluk'tan ack | ⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **QUORUM** | N cluster'dan ack | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| **ANY** | Herhangi birinden ack | ⭐ | ⭐⭐⭐⭐⭐ |
 
-- **ALL_CLUSTERS**: Tüm cluster'lardan ack gelene kadar bekle (en güvenli, en yavaş)
-- **MAJORITY**: Cluster'ların çoğunluğundan ack geldiğinde başarılı say (balanced)
-- **ANY**: Herhangi bir cluster'dan ack geldiğinde başarılı say (en hızlı, en az güvenli)
-- **QUORUM**: Belirlenen quorum sayısından ack geldiğinde başarılı say (configurable)
+## 🚦 Rate Limiting
 
-## 🔍 Troubleshooting
-
-### Cluster Bağlantı Sorunları
-
-```bash
-# Health check ile cluster durumunu kontrol edin
-curl http://localhost:8080/health
-
-# Loglarda cluster connection hatalarını arayın
-docker logs kafkatwin | grep "cluster.*failed"
-
-# Cluster health metrics'lerini kontrol edin
-curl http://localhost:9090/metrics | grep cluster_health_status
-```
-
-### Yüksek Latency
+Rate limit ayarlama:
 
 ```bash
-# Latency metrics'lerini kontrol edin
-curl http://localhost:9090/metrics | grep latency
-
-# Circuit breaker durumunu kontrol edin
-curl http://localhost:8080/health
+curl -X PUT http://localhost:8000/api/v1/quotas/client-1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "produce_byte_rate": 10485760,  # 10MB/s
+    "fetch_byte_rate": 52428800,    # 50MB/s
+    "request_rate": 1000            # 1000 req/s
+  }'
 ```
 
 ## 🛣️ Roadmap
 
-- [x] Core multi-cluster produce/consume functionality
-- [x] Health monitoring ve circuit breaker
+- [x] Core multi-cluster produce/consume
+- [x] Health monitoring & circuit breaker
 - [x] Prometheus metrics
 - [x] Consumer group coordination
-- [ ] Full Kafka wire protocol implementation
-- [ ] Schema Registry integration
-- [ ] Message transformation
-- [ ] Rate limiting ve quota management
-- [ ] Admin API (REST)
-- [ ] Web UI
-- [ ] Kubernetes operator
-- [ ] Multi-DC support
-
-## 🤝 Katkıda Bulunma
-
-Katkılarınızı bekliyoruz! Lütfen şu adımları takip edin:
-
-1. Fork edin
-2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
-3. Değişikliklerinizi commit edin (`git commit -m 'Add amazing feature'`)
-4. Branch'inizi push edin (`git push origin feature/amazing-feature`)
-5. Pull Request açın
+- [x] Schema Registry integration
+- [x] Message transformation
+- [x] Rate limiting & quotas
+- [x] Admin REST API
+- [x] Web UI
+- [x] Kubernetes support
+- [x] Multi-DC support
+- [ ] Full Kafka wire protocol
+- [ ] Kubernetes Operator
+- [ ] Data encryption at rest
+- [ ] Kafka Streams support
+- [ ] Kafka Connect integration
 
 ## 📄 Lisans
 
-Bu proje MIT lisansı altında lisanslanmıştır. Detaylar için `LICENSE` dosyasına bakın.
+MIT License - Detaylar için `LICENSE` dosyasına bakın.
 
-## 📧 İletişim
+## 🙏 Credits
 
-Sorularınız veya önerileriniz için issue açabilirsiniz.
-
-## 🙏 Teşekkürler
-
-- [Sarama](https://github.com/IBM/sarama) - Kafka client library
-- [Prometheus](https://prometheus.io/) - Monitoring ve alerting
-- [Uber Zap](https://github.com/uber-go/zap) - Structured logging
+- [Sarama](https://github.com/IBM/sarama) - Kafka client
+- [Prometheus](https://prometheus.io/) - Monitoring
+- [Uber Zap](https://github.com/uber-go/zap) - Logging
+- [Gorilla Mux](https://github.com/gorilla/mux) - HTTP router
 
 ---
 
-**Not**: Bu proje production-ready değildir ve aktif geliştirme aşamasındadır. Production kullanımı için kapsamlı test ve validasyon gereklidir.
+⭐ **Star** this repo if you find it useful!

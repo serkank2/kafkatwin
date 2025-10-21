@@ -1,0 +1,26 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafkatwin
+  labels:
+    app: kafkatwin
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: kafkatwin
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafkatwin
+  labels:
+    app: kafkatwin
+spec:
+  selector:
+    matchLabels:
+      app: kafkatwin
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
