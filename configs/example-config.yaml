@@ -1,0 +1,229 @@
+# KafkaTwin Multi-Cluster Proxy Configuration
+# This is a comprehensive example configuration file
+
+# Server configuration
+server:
+  listen_address: "0.0.0.0"
+  port: 9092
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+
+# Backend Kafka cluster configurations
+clusters:
+  # Primary cluster
+  - id: "cluster-1"
+    bootstrap_servers:
+      - "kafka1-1.example.com:9092"
+      - "kafka1-2.example.com:9092"
+      - "kafka1-3.example.com:9092"
+    priority: 1
+    weight: 100
+    timeout:
+      connection: 10s
+      request: 30s
+      metadata: 5s
+    security:
+      protocol: "PLAINTEXT"  # PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
+      sasl:
+        enabled: false
+        mechanism: "PLAIN"  # PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+        username: ""
+        password: ""
+      tls:
+        enabled: false
+        cert_file: ""
+        key_file: ""
+        ca_file: ""
+        insecure_skip_verify: false
+
+  # Secondary cluster
+  - id: "cluster-2"
+    bootstrap_servers:
+      - "kafka2-1.example.com:9092"
+      - "kafka2-2.example.com:9092"
+      - "kafka2-3.example.com:9092"
+    priority: 1
+    weight: 100
+    timeout:
+      connection: 10s
+      request: 30s
+      metadata: 5s
+    security:
+      protocol: "PLAINTEXT"
+      sasl:
+        enabled: false
+      tls:
+        enabled: false
+
+  # Optional: Secure cluster with SASL/SSL
+  # - id: "secure-cluster"
+  #   bootstrap_servers:
+  #     - "kafka-secure.example.com:9093"
+  #   priority: 2
+  #   weight: 50
+  #   security:
+  #     protocol: "SASL_SSL"
+  #     sasl:
+  #       enabled: true
+  #       mechanism: "SCRAM-SHA-256"
+  #       username: "kafka-user"
+  #       password: "kafka-password"
+  #     tls:
+  #       enabled: true
+  #       ca_file: "/etc/kafkatwin/ca-cert.pem"
+  #       cert_file: "/etc/kafkatwin/client-cert.pem"
+  #       key_file: "/etc/kafkatwin/client-key.pem"
+
+# Producer configuration
+producer:
+  # Acknowledgment policy
+  # - ALL_CLUSTERS: Wait for ack from all clusters (safest, slowest)
+  # - MAJORITY: Wait for ack from majority of clusters (balanced)
+  # - ANY: Wait for ack from any cluster (fastest, least safe)
+  # - QUORUM: Wait for ack from specified quorum_count (configurable)
+  ack_policy: "MAJORITY"
+
+  # Required number of acks for QUORUM policy
+  quorum_count: 2
+
+  # Timeout for produce operations
+  timeout: 30s
+
+  # Maximum number of retries
+  max_retries: 3
+
+  # Retry backoff duration
+  retry_backoff: 100ms
+
+  # Enable idempotent producer
+  enable_idempotency: false
+
+  # Maximum in-flight requests
+  max_in_flight: 5
+
+# Consumer configuration
+consumer:
+  # Maximum number of records to return in a single poll
+  max_poll_records: 500
+
+  # Minimum bytes to fetch
+  fetch_min_bytes: 1
+
+  # Maximum bytes to fetch
+  fetch_max_bytes: 52428800  # 50MB
+
+  # Maximum wait time for fetch
+  fetch_max_wait: 500ms
+
+  # Session timeout for consumer groups
+  session_timeout: 10s
+
+  # Heartbeat interval
+  heartbeat_interval: 3s
+
+  # Offset storage configuration
+  offset_storage:
+    type: "memory"  # memory, redis, etcd, kafka
+    servers: []
+    topic: "__kafkatwin_offsets"
+    database: 0
+    prefix: "kafkatwin"
+
+# Security configuration
+security:
+  # Client authentication
+  authentication:
+    enabled: false
+    mechanism: "SASL"  # SASL, mTLS
+    sasl:
+      enabled: false
+      mechanism: "PLAIN"
+      username: ""
+      password: ""
+
+  # Client authorization
+  authorization:
+    enabled: false
+    type: "simple"  # simple, acl
+    acl_file: ""
+
+  # TLS for client connections
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    insecure_skip_verify: false
+
+  # Audit logging
+  audit_log:
+    enabled: false
+    file: "/var/log/kafkatwin/audit.log"
+
+# Monitoring configuration
+monitoring:
+  # Prometheus metrics
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    provider: "prometheus"  # prometheus, statsd
+
+  # Logging
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARN, ERROR, FATAL
+    format: "json"  # json, text
+    output: "stdout"  # stdout, file
+    file: "/var/log/kafkatwin/proxy.log"
+    max_size: 100  # megabytes
+    max_backups: 3
+    max_age: 7  # days
+    sampling:
+      enabled: false
+      initial: 100
+      thereafter: 100
+
+  # Distributed tracing
+  tracing:
+    enabled: false
+    provider: "jaeger"  # jaeger, zipkin, otlp
+    endpoint: "http://jaeger:14268/api/traces"
+    sample_rate: 0.1
+
+  # Health checks
+  health:
+    enabled: true
+    port: 8080
+    interval: 10s
+    timeout: 5s
+    unhealthy_threshold: 3
+    healthy_threshold: 2
+
+# Performance tuning
+performance:
+  # Connection pool settings
+  connection_pool:
+    min_connections: 2
+    max_connections: 10
+    idle_timeout: 5m
+    max_lifetime: 30m
+
+  # Cache settings
+  cache:
+    metadata_ttl: 5m
+    offset_ttl: 1m
+    max_size: 10000  # entries
+
+  # Batching settings
+  batching:
+    enabled: false
+    max_size: 1000
+    linger_time: 10ms
+
+  # Worker pool settings
+  workers:
+    min_workers: 10
+    max_workers: 100
