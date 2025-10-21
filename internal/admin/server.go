@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -100,6 +102,38 @@ func (s *Server) setupRoutes() {
 	// System info
 	api.HandleFunc("/info", s.getSystemInfo).Methods("GET")
 	api.HandleFunc("/stats", s.getStats).Methods("GET")
+
+	// Serve static files from web directory
+	webDir := getWebDir()
+
+	// Serve static assets (CSS, JS)
+	s.router.PathPrefix("/static/").Handler(
+		http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(webDir, "static")))),
+	)
+
+	// Serve index.html for root and any other non-API paths
+	s.router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Don't serve index.html for API calls
+		if filepath.Ext(r.URL.Path) != "" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(webDir, "index.html"))
+	})
+}
+
+// getWebDir returns the path to the web directory
+func getWebDir() string {
+	// Try to find web directory relative to the binary
+	if dir, err := os.Getwd(); err == nil {
+		webDir := filepath.Join(dir, "web")
+		if _, err := os.Stat(webDir); err == nil {
+			return webDir
+		}
+	}
+
+	// Fallback to relative path
+	return "web"
 }
 
 // Start starts the admin API server
