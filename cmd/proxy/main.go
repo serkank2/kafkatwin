@@ -10,26 +10,31 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/serkank2/kafkatwin/internal/admin"
 	"github.com/serkank2/kafkatwin/internal/cluster"
 	"github.com/serkank2/kafkatwin/internal/config"
 	"github.com/serkank2/kafkatwin/internal/consumer"
 	"github.com/serkank2/kafkatwin/internal/coordination"
 	"github.com/serkank2/kafkatwin/internal/metadata"
 	"github.com/serkank2/kafkatwin/internal/monitoring"
+	"github.com/serkank2/kafkatwin/internal/multidc"
 	"github.com/serkank2/kafkatwin/internal/producer"
 	"github.com/serkank2/kafkatwin/internal/protocol"
+	"github.com/serkank2/kafkatwin/internal/ratelimit"
+	"github.com/serkank2/kafkatwin/internal/schema"
+	"github.com/serkank2/kafkatwin/internal/transformation"
 )
 
 var (
 	configFile = flag.String("config", "config.yaml", "Path to configuration file")
-	version    = "1.0.0"
+	version    = "2.0.0"
 	buildTime  = "unknown"
 )
 
 func main() {
 	flag.Parse()
 
-	fmt.Printf("KafkaTwin Multi-Cluster Proxy v%s (built %s)\n", version, buildTime)
+	fmt.Printf("🔄 KafkaTwin Multi-Cluster Proxy v%s (built %s)\n", version, buildTime)
 
 	// Load configuration
 	cfg, err := loadConfig(*configFile)
@@ -70,6 +75,7 @@ func main() {
 			monitoring.Fatal("Failed to start metrics server", zap.Error(err))
 		}
 		defer metricsServer.Stop()
+		monitoring.Info("Metrics server started", zap.Int("port", cfg.Monitoring.Metrics.Port))
 	}
 
 	// Start health server
@@ -85,6 +91,16 @@ func main() {
 			monitoring.Fatal("Failed to start health server", zap.Error(err))
 		}
 		defer healthServer.Stop()
+		monitoring.Info("Health server started", zap.Int("port", cfg.Monitoring.Health.Port))
+	}
+
+	// Start Admin API server
+	if app.AdminServer != nil {
+		if err := app.AdminServer.Start(); err != nil {
+			monitoring.Fatal("Failed to start admin API server", zap.Error(err))
+		}
+		defer app.AdminServer.Stop()
+		monitoring.Info("Admin API server started", zap.Int("port", cfg.AdminAPI.Port))
 	}
 
 	// Start protocol server
@@ -97,6 +113,11 @@ func main() {
 		zap.String("listen_address", cfg.Server.ListenAddress),
 		zap.Int("port", cfg.Server.Port),
 		zap.Int("clusters", len(cfg.Clusters)),
+		zap.Bool("schema_registry", cfg.SchemaRegistry.Enabled),
+		zap.Bool("transformations", cfg.Transformation.Enabled),
+		zap.Bool("rate_limiting", cfg.RateLimit.Enabled),
+		zap.Bool("admin_api", cfg.AdminAPI.Enabled),
+		zap.Bool("multi_dc", cfg.MultiDC.Enabled),
 	)
 
 	// Wait for shutdown signal
@@ -114,6 +135,11 @@ type Application struct {
 	ConsumerHandler     *consumer.Handler
 	CoordinationService *coordination.Service
 	ProtocolServer      *protocol.Server
+	SchemaRegistry      *schema.Registry
+	TransformEngine     *transformation.Engine
+	RateLimiter         *ratelimit.Limiter
+	AdminServer         *admin.Server
+	MultiDCManager      *multidc.Manager
 }
 
 // loadConfig loads configuration from file
@@ -132,26 +158,101 @@ func loadConfig(filename string) (*config.Config, error) {
 func initializeApp(cfg *config.Config) (*Application, error) {
 	monitoring.Info("Initializing application components")
 
+	app := &Application{
+		Config: cfg,
+	}
+
 	// Initialize cluster manager
 	clusterManager, err := cluster.NewManager(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cluster manager: %w", err)
 	}
+	app.ClusterManager = clusterManager
 
 	// Initialize metadata manager
 	metadataManager := metadata.NewManager(clusterManager, cfg.Performance.Cache)
+	app.MetadataManager = metadataManager
+
+	// Initialize Schema Registry (if enabled)
+	if cfg.SchemaRegistry.Enabled {
+		schemaRegistry := schema.NewRegistry(schema.RegistryConfig{
+			URL:      cfg.SchemaRegistry.URL,
+			Timeout:  cfg.SchemaRegistry.Timeout,
+			CacheTTL: cfg.SchemaRegistry.CacheTTL,
+		})
+		app.SchemaRegistry = schemaRegistry
+		monitoring.Info("Schema Registry initialized", zap.String("url", cfg.SchemaRegistry.URL))
+	}
+
+	// Initialize Transformation Engine (if enabled)
+	if cfg.Transformation.Enabled {
+		transformEngine := transformation.NewEngine()
+		app.TransformEngine = transformEngine
+		monitoring.Info("Transformation Engine initialized")
+	}
+
+	// Initialize Rate Limiter (if enabled)
+	if cfg.RateLimit.Enabled {
+		rateLimiter := ratelimit.NewLimiter(ratelimit.Config{
+			DefaultRequestsPerSecond: cfg.RateLimit.DefaultRequestsPerSecond,
+			DefaultBytesPerSecond:    cfg.RateLimit.DefaultBytesPerSecond,
+			BurstSize:                cfg.RateLimit.BurstSize,
+			QuotaCheckInterval:       cfg.RateLimit.QuotaCheckInterval,
+		})
+		app.RateLimiter = rateLimiter
+		monitoring.Info("Rate Limiter initialized")
+	}
+
+	// Initialize Multi-DC Manager (if enabled)
+	if cfg.MultiDC.Enabled {
+		multiDCManager := multidc.NewManager(multidc.Config{
+			Strategy:            multidc.ReplicationStrategy(cfg.MultiDC.Strategy),
+			LocalDC:             cfg.MultiDC.LocalDC,
+			HealthCheckInterval: cfg.MultiDC.HealthCheckInterval,
+			LatencyThreshold:    cfg.MultiDC.LatencyThreshold,
+			PreferLocalReads:    cfg.MultiDC.PreferLocalReads,
+		})
+
+		// Register datacenters
+		for _, dcCfg := range cfg.MultiDC.Datacenters {
+			dc := &multidc.Datacenter{
+				ID:       dcCfg.ID,
+				Name:     dcCfg.Name,
+				Region:   dcCfg.Region,
+				Priority: dcCfg.Priority,
+				Clusters: make([]*cluster.Cluster, 0),
+			}
+
+			// Add clusters to datacenter
+			for _, clusterID := range dcCfg.ClusterIDs {
+				if c, err := clusterManager.GetCluster(clusterID); err == nil {
+					dc.Clusters = append(dc.Clusters, c)
+				}
+			}
+
+			if err := multiDCManager.RegisterDatacenter(dc); err != nil {
+				monitoring.Warn("Failed to register datacenter", zap.String("dc", dcCfg.ID), zap.Error(err))
+			}
+		}
+
+		app.MultiDCManager = multiDCManager
+		monitoring.Info("Multi-DC Manager initialized", zap.Int("datacenters", len(cfg.MultiDC.Datacenters)))
+	}
 
 	// Initialize producer handler
 	producerHandler := producer.NewHandler(clusterManager, metadataManager, cfg.Producer)
+	app.ProducerHandler = producerHandler
 
 	// Initialize consumer handler
 	consumerHandler, err := consumer.NewHandler(clusterManager, metadataManager, cfg.Consumer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consumer handler: %w", err)
 	}
+	app.ConsumerHandler = consumerHandler
 
 	// Initialize coordination service
 	coordinationService := coordination.NewService(clusterManager, metadataManager, cfg.Consumer)
+	app.CoordinationService = coordinationService
 
 	// Initialize protocol server
 	protocolServer := protocol.NewServer(
@@ -160,18 +261,26 @@ func initializeApp(cfg *config.Config) (*Application, error) {
 		consumerHandler,
 		coordinationService,
 	)
+	app.ProtocolServer = protocolServer
+
+	// Initialize Admin API server (if enabled)
+	if cfg.AdminAPI.Enabled {
+		adminServer := admin.NewServer(
+			admin.Config{
+				Port: cfg.AdminAPI.Port,
+			},
+			clusterManager,
+			metadataManager,
+			app.SchemaRegistry,
+			app.TransformEngine,
+			app.RateLimiter,
+		)
+		app.AdminServer = adminServer
+	}
 
 	monitoring.Info("Application components initialized successfully")
 
-	return &Application{
-		Config:              cfg,
-		ClusterManager:      clusterManager,
-		MetadataManager:     metadataManager,
-		ProducerHandler:     producerHandler,
-		ConsumerHandler:     consumerHandler,
-		CoordinationService: coordinationService,
-		ProtocolServer:      protocolServer,
-	}, nil
+	return app, nil
 }
 
 // waitForShutdown waits for shutdown signal and performs graceful shutdown
@@ -188,6 +297,13 @@ func waitForShutdown(ctx context.Context, app *Application) {
 
 	// Perform graceful shutdown
 	monitoring.Info("Starting graceful shutdown")
+
+	// Stop admin server
+	if app.AdminServer != nil {
+		if err := app.AdminServer.Stop(); err != nil {
+			monitoring.Error("Error stopping admin server", zap.Error(err))
+		}
+	}
 
 	// Stop accepting new connections
 	if err := app.ProtocolServer.Stop(); err != nil {
