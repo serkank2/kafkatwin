@@ -183,7 +183,7 @@ func (h *Handler) fetchFromCluster(ctx context.Context, c *cluster.Cluster, req 
 	return result
 }
 
-// fetchMessages fetches messages from a cluster
+// fetchMessages fetches messages from a cluster with improved error handling
 func (h *Handler) fetchMessages(ctx context.Context, c *cluster.Cluster, req *FetchRequest, offset int64, result *ClusterFetchResult) error {
 	consumer, err := c.ConnectionPool.GetConsumer()
 	if err != nil {
@@ -194,36 +194,100 @@ func (h *Handler) fetchMessages(ctx context.Context, c *cluster.Cluster, req *Fe
 	// Create partition consumer
 	partitionConsumer, err := consumer.ConsumePartition(req.Topic, req.Partition, offset)
 	if err != nil {
-		return fmt.Errorf("failed to create partition consumer: %w", err)
+		return fmt.Errorf("failed to create partition consumer for topic %s partition %d: %w", req.Topic, req.Partition, err)
 	}
-	defer partitionConsumer.Close()
+	defer func() {
+		if closeErr := partitionConsumer.Close(); closeErr != nil {
+			monitoring.Warn("Failed to close partition consumer",
+				zap.String("cluster", c.ID),
+				zap.String("topic", req.Topic),
+				zap.Int32("partition", req.Partition),
+				zap.Error(closeErr),
+			)
+		}
+	}()
 
 	// Fetch messages with timeout
 	fetchCtx, cancel := context.WithTimeout(ctx, req.MaxWait)
 	defer cancel()
 
-	messages := make([]*sarama.ConsumerMessage, 0)
+	messages := make([]*sarama.ConsumerMessage, 0, h.config.MaxPollRecords)
 	var totalBytes int32
+	var lastError error
 
 	for {
 		select {
 		case msg := <-partitionConsumer.Messages():
+			if msg == nil {
+				continue
+			}
+
 			messages = append(messages, msg)
 			totalBytes += int32(len(msg.Value))
 
-			if len(messages) >= h.config.MaxPollRecords || totalBytes >= req.MaxBytes {
+			// Log every 100 messages for large batches
+			if len(messages)%100 == 0 {
+				monitoring.Debug("Fetching messages in progress",
+					zap.String("cluster", c.ID),
+					zap.String("topic", req.Topic),
+					zap.Int("messages_fetched", len(messages)),
+					zap.Int32("bytes_fetched", totalBytes),
+				)
+			}
+
+			// Check if we've reached the limits
+			if len(messages) >= h.config.MaxPollRecords {
 				result.Messages = messages
 				result.HighWaterMark = partitionConsumer.HighWaterMarkOffset()
+				monitoring.Debug("Max poll records reached",
+					zap.String("cluster", c.ID),
+					zap.Int("messages", len(messages)),
+				)
+				return nil
+			}
+
+			if totalBytes >= req.MaxBytes {
+				result.Messages = messages
+				result.HighWaterMark = partitionConsumer.HighWaterMarkOffset()
+				monitoring.Debug("Max bytes reached",
+					zap.String("cluster", c.ID),
+					zap.Int32("bytes", totalBytes),
+				)
 				return nil
 			}
 
 		case err := <-partitionConsumer.Errors():
-			return err
+			if err != nil {
+				lastError = err
+				monitoring.Warn("Error while consuming messages",
+					zap.String("cluster", c.ID),
+					zap.String("topic", req.Topic),
+					zap.Int32("partition", req.Partition),
+					zap.Error(err),
+				)
+				// Continue trying to fetch more messages
+				continue
+			}
 
 		case <-fetchCtx.Done():
-			// Return what we have so far
+			// Timeout or cancellation - return what we have
 			result.Messages = messages
 			result.HighWaterMark = partitionConsumer.HighWaterMarkOffset()
+
+			if len(messages) > 0 {
+				monitoring.Debug("Fetch completed with timeout",
+					zap.String("cluster", c.ID),
+					zap.Int("messages", len(messages)),
+					zap.Int32("bytes", totalBytes),
+				)
+				return nil
+			}
+
+			// If we got no messages and had errors, return the error
+			if lastError != nil {
+				return fmt.Errorf("fetch failed with errors: %w", lastError)
+			}
+
 			return nil
 		}
 	}
@@ -289,15 +353,34 @@ func (h *Handler) mergeResults(req *FetchRequest, results []*ClusterFetchResult,
 	return response
 }
 
-// deduplicateMessages removes duplicate messages
+// deduplicateMessages removes duplicate messages using multiple criteria
 func (h *Handler) deduplicateMessages(messages []*Message) []*Message {
-	seen := make(map[int64]bool)
-	result := make([]*Message, 0)
+	// Use composite key: offset + timestamp for better deduplication
+	type messageKey struct {
+		offset    int64
+		timestamp int64
+	}
+
+	seen := make(map[messageKey]bool)
+	result := make([]*Message, 0, len(messages))
 
 	for _, msg := range messages {
-		if !seen[msg.Offset] {
-			seen[msg.Offset] = true
+		key := messageKey{
+			offset:    msg.Offset,
+			timestamp: msg.Timestamp.UnixNano(),
+		}
+
+		if !seen[key] {
+			seen[key] = true
 			result = append(result, msg)
+		} else {
+			monitoring.Debug("Duplicate message filtered",
+				zap.String("topic", msg.Topic),
+				zap.Int32("partition", msg.Partition),
+				zap.Int64("offset", msg.Offset),
+				zap.Time("timestamp", msg.Timestamp),
+				zap.String("cluster", msg.ClusterID),
+			)
 		}
 	}
 

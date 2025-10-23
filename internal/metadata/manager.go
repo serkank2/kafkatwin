@@ -256,25 +256,50 @@ func (m *Manager) updateBrokerMetadata(c *cluster.Cluster) {
 	}
 }
 
-// GetTopicMetadata returns metadata for a topic
+// GetTopicMetadata returns metadata for a topic with automatic refresh on cache miss
 func (m *Manager) GetTopicMetadata(topic string) (*TopicMetadata, error) {
+	// First, try to get from cache
 	m.cache.mu.RLock()
-	defer m.cache.mu.RUnlock()
-
 	meta, exists := m.cache.topics[topic]
-	if !exists {
-		// Try to refresh
-		m.cache.mu.RUnlock()
-		if err := m.RefreshAll(); err != nil {
-			m.cache.mu.RLock()
-			return nil, fmt.Errorf("topic not found and refresh failed: %w", err)
-		}
-		m.cache.mu.RLock()
+	m.cache.mu.RUnlock()
 
-		meta, exists = m.cache.topics[topic]
-		if !exists {
-			return nil, fmt.Errorf("topic %s not found", topic)
+	if exists {
+		// Check if metadata is stale
+		if time.Since(meta.LastUpdated) < m.config.MetadataTTL {
+			return meta, nil
 		}
+
+		monitoring.Debug("Topic metadata stale, refreshing",
+			zap.String("topic", topic),
+			zap.Duration("age", time.Since(meta.LastUpdated)),
+		)
+	}
+
+	// Cache miss or stale data - refresh from clusters
+	if err := m.RefreshAll(); err != nil {
+		monitoring.Warn("Failed to refresh metadata",
+			zap.String("topic", topic),
+			zap.Error(err),
+		)
+
+		// If we have stale data, return it anyway
+		if exists {
+			monitoring.Debug("Returning stale metadata due to refresh failure",
+				zap.String("topic", topic),
+			)
+			return meta, nil
+		}
+
+		return nil, fmt.Errorf("topic not found and refresh failed: %w", err)
+	}
+
+	// Try again after refresh
+	m.cache.mu.RLock()
+	meta, exists = m.cache.topics[topic]
+	m.cache.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("topic %s not found in any cluster", topic)
 	}
 
 	return meta, nil
