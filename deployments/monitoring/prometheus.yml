@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'kafkatwin'
+    environment: 'development'
+
+# Alertmanager configuration (optional)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - 'alertmanager:9093'
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - "alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # KafkaTwin Proxy metrics
+  - job_name: 'kafkatwin'
+    static_configs:
+      - targets: ['kafkatwin:9090']
+        labels:
+          service: 'kafkatwin-proxy'
+          component: 'proxy'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # Kafka JMX Exporter (optional - requires JMX exporter setup)
+  # - job_name: 'kafka'
+  #   static_configs:
+  #     - targets:
+  #       - 'kafka-1:7071'
+  #       - 'kafka-2:7071'
+  #       labels:
+  #         service: 'kafka'

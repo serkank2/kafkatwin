@@ -1,5 +1,7 @@
 # Binaries
 kafkatwin
+kafkatwin-*
+bin/
 *.exe
 *.dll
 *.so
@@ -10,9 +12,13 @@ kafkatwin
 
 # Output of the go coverage tool
 *.out
+coverage/
+coverage.html
+coverage.xml
 
 # Go workspace file
 go.work
+go.work.sum
 
 # Dependencies
 vendor/
@@ -23,19 +29,71 @@ vendor/
 *.swp
 *.swo
 *~
+*.iml
 
 # OS
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # Config files (except examples)
 config.yaml
+config.*.yaml
+!config.example.yaml
 *.local.yaml
+*.secret.yaml
 
 # Logs
 *.log
 logs/
+/var/log/kafkatwin/
 
 # Temporary files
 tmp/
 temp/
+*.tmp
+
+# Data directories
+data/
+*.db
+*.sqlite
+
+# Docker volumes
+docker-data/
+
+# Build artifacts
+dist/
+build/
+out/
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Profiling and debug
+*.pprof
+*.prof
+cpu.prof
+mem.prof
+
+# Generated files
+*.pb.go
+*.gen.go
+
+# Archives
+*.tar
+*.tar.gz
+*.zip
+*.rar
+
+# CI/CD
+.github/workflows/*.local.yml

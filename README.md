@@ -59,15 +59,42 @@ KafkaTwin, birden fazla Apache Kafka cluster'ını tek bir endpoint üzerinden y
 - (Opsiyonel) Redis/etcd (offset storage için)
 - Linux, macOS veya Windows
 
-## 🚀 Kurulum
+## 🚀 Hızlı Başlangıç
 
-### Binary ile Kurulum
+### Makefile ile Hızlı Kurulum (Önerilen)
 
 ```bash
 # Projeyi clone edin
 git clone https://github.com/serkank2/kafkatwin.git
 cd kafkatwin
 
+# Tüm servisleri başlatın (Kafka, Zookeeper, KafkaTwin, Prometheus, Grafana)
+make docker-up
+
+# Logları izleyin
+make docker-logs-proxy
+```
+
+Bu komut otomatik olarak:
+- 2 Kafka cluster'ı (cluster-1, cluster-2)
+- Schema Registry
+- Prometheus
+- Grafana
+- KafkaTwin Proxy
+
+hizmetlerini başlatır.
+
+**Erişim Noktaları:**
+- KafkaTwin Proxy: `localhost:9092`
+- Admin Web UI: `http://localhost:8090`
+- Health Check: `http://localhost:8080/health`
+- Prometheus Metrics: `http://localhost:9090/metrics`
+- Prometheus UI: `http://localhost:9091`
+- Grafana: `http://localhost:3000` (admin/admin)
+
+### Manuel Binary Kurulum
+
+```bash
 # Bağımlılıkları indirin
 go mod download
 
@@ -75,7 +102,7 @@ go mod download
 make build
 
 # Çalıştırın
-./kafkatwin -config config.yaml
+./bin/kafkatwin -config config.yaml
 ```
 
 ### Docker ile Kurulum
@@ -85,7 +112,7 @@ make build
 make docker-build
 
 # Çalıştırın
-docker run -p 9092:9092 -p 8080:8080 -p 9090:9090 -p 8000:8000 \
+docker run -p 9092:9092 -p 8080:8080 -p 8090:8090 -p 9090:9090 \
   -v $(pwd)/config.yaml:/app/config.yaml \
   kafkatwin:latest
 ```
@@ -99,11 +126,87 @@ kubectl apply -f deployments/kubernetes/configmap.yaml
 # Deployment oluşturun
 kubectl apply -f deployments/kubernetes/deployment.yaml
 
+# Service oluşturun
+kubectl apply -f deployments/kubernetes/service.yaml
+
 # HPA (opsiyonel)
 kubectl apply -f deployments/kubernetes/hpa.yaml
 
 # PDB (opsiyonel)
 kubectl apply -f deployments/kubernetes/pdb.yaml
+
+# ServiceMonitor (Prometheus Operator ile kullanım için)
+kubectl apply -f deployments/kubernetes/pdb.yaml
+```
+
+## 🎮 Kullanım Örnekleri
+
+### Producer Örneği
+
+```go
+package main
+
+import (
+    "github.com/IBM/sarama"
+)
+
+func main() {
+    config := sarama.NewConfig()
+    config.Producer.Return.Successes = true
+
+    // KafkaTwin proxy'ye bağlan
+    producer, err := sarama.NewSyncProducer([]string{"localhost:9092"}, config)
+    if err != nil {
+        panic(err)
+    }
+    defer producer.Close()
+
+    // Mesaj gönder - otomatik olarak tüm cluster'lara yazılacak
+    msg := &sarama.ProducerMessage{
+        Topic: "my-topic",
+        Value: sarama.StringEncoder("Hello KafkaTwin!"),
+    }
+
+    partition, offset, err := producer.SendMessage(msg)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Message sent to partition %d at offset %d\n", partition, offset)
+}
+```
+
+### Consumer Örneği
+
+```go
+package main
+
+import (
+    "github.com/IBM/sarama"
+)
+
+func main() {
+    config := sarama.NewConfig()
+    config.Consumer.Return.Errors = true
+
+    // KafkaTwin proxy'ye bağlan
+    consumer, err := sarama.NewConsumer([]string{"localhost:9092"}, config)
+    if err != nil {
+        panic(err)
+    }
+    defer consumer.Close()
+
+    // Topic'ten oku - otomatik olarak tüm cluster'lardan merge edilecek
+    partitionConsumer, err := consumer.ConsumePartition("my-topic", 0, sarama.OffsetNewest)
+    if err != nil {
+        panic(err)
+    }
+    defer partitionConsumer.Close()
+
+    for msg := range partitionConsumer.Messages() {
+        fmt.Printf("Received: %s\n", string(msg.Value))
+    }
+}
 ```
 
 ## ⚙️ Konfigürasyon
@@ -135,7 +238,7 @@ consumer:
 
 admin_api:
   enabled: true
-  port: 8000
+  port: 8090
   web_ui: true
 
 monitoring:
@@ -147,21 +250,58 @@ monitoring:
     port: 8080
 ```
 
+## 🧪 Testing
+
+### Unit Testleri Çalıştır
+
+```bash
+# Tüm testleri çalıştır
+make test
+
+# Coverage report ile
+make test-coverage
+
+# Coverage HTML raporu görüntüle
+open coverage/coverage.html  # macOS
+xdg-open coverage/coverage.html  # Linux
+```
+
+### Benchmark Testleri
+
+```bash
+make bench
+```
+
+### Integration Testleri
+
+```bash
+# Docker compose ile test ortamı başlat
+make docker-up
+
+# Testleri çalıştır
+go test -v -tags=integration ./...
+
+# Temizle
+make docker-down
+```
+
 ## 📊 Admin API & Web UI
 
 KafkaTwin, kapsamlı bir Admin API ve Web Dashboard sunar.
 
 ### Web Dashboard
 
-Web UI'ya erişim: `http://localhost:8000`
+Web UI'ya erişim: `http://localhost:8090`
 
 Dashboard özellikleri:
-- Real-time cluster health monitoring
-- Topic ve partition görüntüleme
-- Schema Registry yönetimi
-- Transformation rule yönetimi
-- Quota ve rate limit ayarları
-- Sistem metrikleri ve grafikler
+- **Real-time Monitoring**: Cluster health, throughput, latency grafikleri
+- **Topic Management**: Topic listesi, partition detayları, offset bilgileri
+- **Schema Registry**: Schema görüntüleme, kayıt, uyumluluk kontrolü
+- **Transformation Rules**: Mesaj dönüşüm kurallarını yönetme
+- **Quota Management**: Client bazlı rate limit ve quota ayarları
+- **System Metrics**: Detaylı Prometheus metrikleri ve trend grafikleri
+
+![Web Dashboard Screenshot](docs/images/dashboard.png)
 
 ### API Endpoints
 
@@ -204,7 +344,7 @@ DELETE /api/v1/quotas/{client_id}  # Quota sil
 Message transformation örneği:
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/transformations/my-topic \
+curl -X POST http://localhost:8090/api/v1/transformations/my-topic \
   -H "Content-Type: application/json" \
   -d '{
     "id": "mask-pii",
@@ -309,7 +449,7 @@ kafkatwin_consumer_lag{group, topic, partition, cluster}
 Rate limit ayarlama:
 
 ```bash
-curl -X PUT http://localhost:8000/api/v1/quotas/client-1 \
+curl -X PUT http://localhost:8090/api/v1/quotas/client-1 \
   -H "Content-Type: application/json" \
   -d '{
     "produce_byte_rate": 10485760,  # 10MB/s
