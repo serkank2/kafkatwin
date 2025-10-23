@@ -149,61 +149,74 @@ func (h *Handler) produceToCluster(ctx context.Context, c *cluster.Cluster, req 
 	return result
 }
 
-// sendMessages sends messages to a cluster
+// sendMessages sends messages to a cluster using sync producer for reliability
 func (h *Handler) sendMessages(ctx context.Context, c *cluster.Cluster, req *ProduceRequest, result *ClusterProduceResult) error {
-	producer, err := c.ConnectionPool.GetProducer()
+	syncProducer, err := c.ConnectionPool.GetSyncProducer()
 	if err != nil {
-		return fmt.Errorf("failed to get producer: %w", err)
+		return fmt.Errorf("failed to get sync producer: %w", err)
 	}
-	defer c.ConnectionPool.ReturnProducer(producer)
+	defer c.ConnectionPool.ReturnSyncProducer(syncProducer)
 
-	// Send messages
-	errChan := make(chan error, len(req.Messages))
-	var wg sync.WaitGroup
+	var lastOffset int64
 
-	for _, msg := range req.Messages {
-		wg.Add(1)
-		go func(message *sarama.ProducerMessage) {
-			defer wg.Done()
+	// Send messages sequentially for guaranteed ordering and reliability
+	for i, msg := range req.Messages {
+		// Check context cancellation before sending each message
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled after %d/%d messages: %w", i, len(req.Messages), ctx.Err())
+		default:
+		}
 
-			// Copy message for this cluster
-			clusterMsg := &sarama.ProducerMessage{
-				Topic:     message.Topic,
-				Key:       message.Key,
-				Value:     message.Value,
-				Headers:   message.Headers,
-				Metadata:  message.Metadata,
-				Partition: message.Partition,
-				Timestamp: message.Timestamp,
-			}
+		// Copy message for this cluster to avoid data races
+		clusterMsg := &sarama.ProducerMessage{
+			Topic:     msg.Topic,
+			Key:       msg.Key,
+			Value:     msg.Value,
+			Headers:   copyHeaders(msg.Headers),
+			Metadata:  msg.Metadata,
+			Partition: msg.Partition,
+			Timestamp: msg.Timestamp,
+		}
 
-			// Send message
-			select {
-			case producer.Input() <- clusterMsg:
-				// Wait for success or error
-				select {
-				case success := <-producer.Successes():
-					result.Offset = success.Offset
-				case err := <-producer.Errors():
-					errChan <- err.Err
-				case <-ctx.Done():
-					errChan <- ctx.Err()
-				}
-			case <-ctx.Done():
-				errChan <- ctx.Err()
-			}
-		}(msg)
-	}
+		// Send message synchronously
+		partition, offset, err := syncProducer.SendMessage(clusterMsg)
+		if err != nil {
+			return fmt.Errorf("failed to send message %d/%d to cluster %s: %w", i+1, len(req.Messages), c.ID, err)
+		}
 
-	wg.Wait()
-	close(errChan)
+		// Store last successful offset
+		lastOffset = offset
 
-	// Check for errors
-	for err := range errChan {
-		return err
+		monitoring.Debug("Message sent successfully",
+			zap.String("cluster", c.ID),
+			zap.String("topic", msg.Topic),
+			zap.Int32("partition", partition),
+			zap.Int64("offset", offset),
+			zap.Int("message_num", i+1),
+			zap.Int("total_messages", len(req.Messages)),
+		)
 	}
 
+	// Set the final offset from the last message
+	result.Offset = lastOffset
 	return nil
+}
+
+// copyHeaders creates a deep copy of headers to avoid data races
+func copyHeaders(headers []*sarama.RecordHeader) []*sarama.RecordHeader {
+	if headers == nil {
+		return nil
+	}
+
+	copied := make([]*sarama.RecordHeader, len(headers))
+	for i, h := range headers {
+		copied[i] = &sarama.RecordHeader{
+			Key:   append([]byte(nil), h.Key...),
+			Value: append([]byte(nil), h.Value...),
+		}
+	}
+	return copied
 }
 
 // evaluateResults evaluates results based on ack policy

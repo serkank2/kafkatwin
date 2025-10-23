@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -66,30 +67,79 @@ func (hm *HealthMonitor) monitorLoop(ctx context.Context, interval time.Duration
 	}
 }
 
-// performHealthCheck performs a health check on the cluster
+// performHealthCheck performs a comprehensive health check on the cluster
 func (hm *HealthMonitor) performHealthCheck() {
 	start := time.Now()
 	defer func() {
 		hm.lastCheckTime.Store(time.Now())
 	}()
 
-	// Try to refresh metadata as a health check
-	err := hm.client.RefreshMetadata()
+	// Perform multiple health checks
+	healthy := true
+	var checkErrors []error
+
+	// 1. Check if client is closed
+	if hm.client.Closed() {
+		checkErrors = append(checkErrors, fmt.Errorf("client is closed"))
+		healthy = false
+	} else {
+		// 2. Check broker connectivity
+		brokers := hm.client.Brokers()
+		if len(brokers) == 0 {
+			checkErrors = append(checkErrors, fmt.Errorf("no brokers available"))
+			healthy = false
+		} else {
+			// Verify at least one broker is connected
+			connectedCount := 0
+			for _, broker := range brokers {
+				if broker.Connected() {
+					connectedCount++
+				}
+			}
+
+			if connectedCount == 0 {
+				checkErrors = append(checkErrors, fmt.Errorf("no brokers connected"))
+				healthy = false
+			}
+
+			// Update active connections metric
+			monitoring.ClusterConnectionsActive.WithLabelValues(hm.clusterID).Set(float64(connectedCount))
+		}
+
+		// 3. Try to refresh metadata
+		if err := hm.client.RefreshMetadata(); err != nil {
+			checkErrors = append(checkErrors, fmt.Errorf("metadata refresh failed: %w", err))
+			healthy = false
+		}
+
+		// 4. Verify controller is available
+		if controller, err := hm.client.Controller(); err != nil {
+			checkErrors = append(checkErrors, fmt.Errorf("controller check failed: %w", err))
+			healthy = false
+		} else if controller == nil {
+			checkErrors = append(checkErrors, fmt.Errorf("no controller available"))
+			healthy = false
+		} else if !controller.Connected() {
+			checkErrors = append(checkErrors, fmt.Errorf("controller not connected"))
+			healthy = false
+		}
+	}
 
 	latency := time.Since(start)
 	hm.latency.Store(latency)
 
-	if err != nil {
+	if !healthy {
 		hm.errorCount.Add(1)
 		hm.healthy.Store(false)
 
 		monitoring.UpdateClusterHealth(hm.clusterID, false)
-		monitoring.RecordError("health_check", hm.clusterID, "metadata_refresh_failed")
+		monitoring.RecordError("health_check", hm.clusterID, "health_check_failed")
 
 		monitoring.Warn("Cluster health check failed",
 			zap.String("cluster", hm.clusterID),
-			zap.Error(err),
+			zap.Errors("errors", checkErrors),
 			zap.Duration("latency", latency),
+			zap.Int("error_count", len(checkErrors)),
 		)
 	} else {
 		hm.successCount.Add(1)
@@ -102,11 +152,11 @@ func (hm *HealthMonitor) performHealthCheck() {
 			zap.Duration("latency", latency),
 		)
 	}
+}
 
-	// Update metrics
-	if hm.client != nil && len(hm.client.Brokers()) > 0 {
-		monitoring.ClusterConnectionsActive.WithLabelValues(hm.clusterID).Set(float64(len(hm.client.Brokers())))
-	}
+// ForceHealthCheck performs an immediate health check (useful for testing or manual triggers)
+func (hm *HealthMonitor) ForceHealthCheck() {
+	hm.performHealthCheck()
 }
 
 // IsHealthy returns the current health status

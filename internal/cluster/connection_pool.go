@@ -12,12 +12,13 @@ import (
 
 // ConnectionPool manages a pool of Kafka connections
 type ConnectionPool struct {
-	clusterConfig config.ClusterConfig
-	poolConfig    config.ConnectionPoolConfig
-	producers     chan sarama.AsyncProducer
-	consumers     chan sarama.Consumer
-	mu            sync.RWMutex
-	closed        bool
+	clusterConfig  config.ClusterConfig
+	poolConfig     config.ConnectionPoolConfig
+	producers      chan sarama.AsyncProducer
+	syncProducers  chan sarama.SyncProducer
+	consumers      chan sarama.Consumer
+	mu             sync.RWMutex
+	closed         bool
 }
 
 // NewConnectionPool creates a new connection pool
@@ -26,13 +27,14 @@ func NewConnectionPool(clusterCfg config.ClusterConfig, poolCfg config.Connectio
 		clusterConfig: clusterCfg,
 		poolConfig:    poolCfg,
 		producers:     make(chan sarama.AsyncProducer, poolCfg.MaxConnections),
+		syncProducers: make(chan sarama.SyncProducer, poolCfg.MaxConnections),
 		consumers:     make(chan sarama.Consumer, poolCfg.MaxConnections),
 	}
 
 	// Pre-create minimum connections
 	for i := 0; i < poolCfg.MinConnections; i++ {
-		if producer, err := pool.createProducer(); err == nil {
-			pool.producers <- producer
+		if producer, err := pool.createSyncProducer(); err == nil {
+			pool.syncProducers <- producer
 		}
 	}
 
@@ -117,7 +119,46 @@ func (p *ConnectionPool) ReturnConsumer(consumer sarama.Consumer) {
 	}
 }
 
-// createProducer creates a new producer
+// GetSyncProducer gets a sync producer from the pool or creates a new one
+func (p *ConnectionPool) GetSyncProducer() (sarama.SyncProducer, error) {
+	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return nil, fmt.Errorf("connection pool is closed")
+	}
+	p.mu.RUnlock()
+
+	select {
+	case producer := <-p.syncProducers:
+		return producer, nil
+	default:
+		return p.createSyncProducer()
+	}
+}
+
+// ReturnSyncProducer returns a sync producer to the pool
+func (p *ConnectionPool) ReturnSyncProducer(producer sarama.SyncProducer) {
+	if producer == nil {
+		return
+	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if p.closed {
+		producer.Close()
+		return
+	}
+
+	select {
+	case p.syncProducers <- producer:
+	default:
+		// Pool is full, close the producer
+		producer.Close()
+	}
+}
+
+// createProducer creates a new async producer
 func (p *ConnectionPool) createProducer() (sarama.AsyncProducer, error) {
 	config := sarama.NewConfig()
 	config.Version = sarama.V2_8_0_0
@@ -125,6 +166,8 @@ func (p *ConnectionPool) createProducer() (sarama.AsyncProducer, error) {
 	config.Producer.Return.Errors = true
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Retry.Max = 3
+	config.Producer.Idempotent = true
+	config.Producer.MaxMessageBytes = 1000000
 
 	if p.clusterConfig.Timeout.Connection > 0 {
 		config.Net.DialTimeout = p.clusterConfig.Timeout.Connection
@@ -139,7 +182,37 @@ func (p *ConnectionPool) createProducer() (sarama.AsyncProducer, error) {
 
 	producer, err := sarama.NewAsyncProducer(p.clusterConfig.BootstrapServers, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create producer: %w", err)
+		return nil, fmt.Errorf("failed to create async producer: %w", err)
+	}
+
+	return producer, nil
+}
+
+// createSyncProducer creates a new sync producer
+func (p *ConnectionPool) createSyncProducer() (sarama.SyncProducer, error) {
+	config := sarama.NewConfig()
+	config.Version = sarama.V2_8_0_0
+	config.Producer.Return.Successes = true
+	config.Producer.Return.Errors = true
+	config.Producer.RequiredAcks = sarama.WaitForAll
+	config.Producer.Retry.Max = 3
+	config.Producer.Idempotent = true
+	config.Producer.MaxMessageBytes = 1000000
+
+	if p.clusterConfig.Timeout.Connection > 0 {
+		config.Net.DialTimeout = p.clusterConfig.Timeout.Connection
+		config.Net.ReadTimeout = p.clusterConfig.Timeout.Request
+		config.Net.WriteTimeout = p.clusterConfig.Timeout.Request
+	}
+
+	// Configure security
+	if err := configureSecurity(config, p.clusterConfig.Security); err != nil {
+		return nil, err
+	}
+
+	producer, err := sarama.NewSyncProducer(p.clusterConfig.BootstrapServers, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create sync producer: %w", err)
 	}
 
 	return producer, nil
@@ -181,9 +254,15 @@ func (p *ConnectionPool) Close() {
 
 	p.closed = true
 
-	// Close all producers
+	// Close all async producers
 	close(p.producers)
 	for producer := range p.producers {
+		producer.Close()
+	}
+
+	// Close all sync producers
+	close(p.syncProducers)
+	for producer := range p.syncProducers {
 		producer.Close()
 	}
 
