@@ -395,8 +395,13 @@ func (m *Manager) GetClusterStats(id string) (map[string]interface{}, error) {
 	if cluster.ConnectionPool != nil {
 		poolStats := cluster.ConnectionPool.GetStats()
 		stats["connection_pool"] = map[string]interface{}{
-			"producers_available": poolStats.ProducersAvailable,
-			"consumers_available": poolStats.ConsumersAvailable,
+			"producers_available":      poolStats.ProducersAvailable,
+			"sync_producers_available": poolStats.SyncProducersAvailable,
+			"consumers_available":      poolStats.ConsumersAvailable,
+			"total_created":            poolStats.TotalCreated,
+			"total_returned":           poolStats.TotalReturned,
+			"total_errors":             poolStats.TotalErrors,
+			"pool_utilization":         poolStats.PoolUtilization,
 		}
 	}
 
